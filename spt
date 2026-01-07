@@ -1,0 +1,657 @@
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const { createCanvas, loadImage } = require("canvas");
+
+module.exports.config = {
+  name: "spt",
+  version: "2.0.2",
+  hasPermssion: 0,
+  credits: "anhkiet",
+  description: "Tìm kiếm và tải nhạc từ Spotify",
+  commandCategory: "media",
+  usages: "[tên bài hát]",
+  cooldowns: 5,
+  usePrefix: true
+};
+
+const SEARCH_API = "thay =api search";
+const DOWNLOAD_API = "thay api down";
+
+const BACKGROUNDS = [
+  "https://files.catbox.moe/wj42ck.jpg",
+  "https://files.catbox.moe/tptpdc.jpg",
+  "https://files.catbox.moe/r859op.jpg",
+  "https://files.catbox.moe/tfk8nq.jpg"
+];
+
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = words[0];
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const width = ctx.measureText(currentLine + " " + word).width;
+    if (width < maxWidth) {
+      currentLine += " " + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  lines.push(currentLine);
+  return lines;
+}
+
+async function createSearchCanvas(results) {
+  const width = 1200;
+  const itemHeight = 160;
+  const headerHeight = 120;
+  const footerHeight = 100;
+  const height = headerHeight + (results.length * itemHeight) + footerHeight;
+  
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, "#191414");
+  gradient.addColorStop(0.5, "#1db954");
+  gradient.addColorStop(1, "#191414");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = "rgba(29, 185, 84, 0.95)";
+  ctx.fillRect(0, 0, width, headerHeight);
+  
+  ctx.fillStyle = "#000000";
+  ctx.beginPath();
+  ctx.arc(100, 60, 40, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = "#1db954";
+  for (let i = 0; i < 3; i++) {
+    const y = 40 + (i * 10);
+    const curveHeight = 5 + (i * 2);
+    ctx.beginPath();
+    ctx.moveTo(70, y);
+    ctx.quadraticCurveTo(85, y - curveHeight, 100, y);
+    ctx.quadraticCurveTo(115, y + curveHeight, 130, y);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#191414";
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 52px Arial";
+  ctx.textAlign = "left";
+  ctx.fillText("Spotify Search", 160, 75);
+  
+  ctx.font = "24px Arial";
+  ctx.fillStyle = "#b3b3b3";
+  ctx.fillText("Millions of songs. Free on Spotify.", 160, 100);
+
+  for (let i = 0; i < results.length; i++) {
+    const item = results[i];
+    const y = headerHeight + (i * itemHeight);
+    
+    const itemGradient = ctx.createLinearGradient(0, y, 0, y + itemHeight);
+    if (i % 2 === 0) {
+      itemGradient.addColorStop(0, "rgba(40, 40, 40, 0.9)");
+      itemGradient.addColorStop(1, "rgba(30, 30, 30, 0.9)");
+    } else {
+      itemGradient.addColorStop(0, "rgba(50, 50, 50, 0.9)");
+      itemGradient.addColorStop(1, "rgba(40, 40, 40, 0.9)");
+    }
+    ctx.fillStyle = itemGradient;
+    ctx.fillRect(0, y, width, itemHeight);
+    
+    ctx.strokeStyle = "rgba(29, 185, 84, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+
+    const numX = 30;
+    const numY = y + (itemHeight / 2);
+    
+    ctx.fillStyle = "#1db954";
+    ctx.beginPath();
+    ctx.arc(numX + 25, numY, 28, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = "#000000";
+    ctx.font = "bold 32px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText((i + 1).toString(), numX + 25, numY + 10);
+
+    const albumX = 90;
+    const albumY = y + 20;
+    const albumSize = 120;
+    
+    if (item.album && item.album.images && item.album.images.length > 0) {
+      try {
+        const albumImg = await loadImage(item.album.images[0].url);
+        ctx.drawImage(albumImg, albumX, albumY, albumSize, albumSize);
+      } catch (e) {
+        ctx.fillStyle = "#282828";
+        ctx.fillRect(albumX, albumY, albumSize, albumSize);
+        ctx.fillStyle = "#1db954";
+        ctx.font = "60px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("*", albumX + albumSize/2, albumY + albumSize/2 + 20);
+      }
+    } else {
+      ctx.fillStyle = "#282828";
+      ctx.fillRect(albumX, albumY, albumSize, albumSize);
+      ctx.fillStyle = "#1db954";
+      ctx.font = "60px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("*", albumX + albumSize/2, albumY + albumSize/2 + 20);
+    }
+    
+    ctx.strokeStyle = "#1db954";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(albumX, albumY, albumSize, albumSize);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 26px Arial";
+    ctx.textAlign = "left";
+    const titleLines = wrapText(ctx, item.name, 700);
+    ctx.fillText(titleLines[0], 230, y + 50);
+    if (titleLines.length > 1) {
+      ctx.font = "bold 22px Arial";
+      ctx.fillText(titleLines[1].substring(0, 50) + "...", 230, y + 78);
+    }
+
+    ctx.fillStyle = "#b3b3b3";
+    ctx.font = "20px Arial";
+    ctx.fillText("Artist: " + item.artist, 230, y + 108);
+
+    ctx.fillStyle = "#1db954";
+    ctx.font = "18px Arial";
+    const albumText = item.album.name.length > 45 ? item.album.name.substring(0, 45) + "..." : item.album.name;
+    ctx.fillText("Album: " + albumText, 230, y + 135);
+
+    const playX = width - 100;
+    const playY = y + (itemHeight / 2);
+    
+    ctx.fillStyle = "#1db954";
+    ctx.beginPath();
+    ctx.arc(playX, playY, 30, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = "#000000";
+    ctx.beginPath();
+    ctx.moveTo(playX - 8, playY - 12);
+    ctx.lineTo(playX - 8, playY + 12);
+    ctx.lineTo(playX + 10, playY);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const footerY = headerHeight + (results.length * itemHeight);
+  const footerGradient = ctx.createLinearGradient(0, footerY, 0, footerY + footerHeight);
+  footerGradient.addColorStop(0, "rgba(29, 185, 84, 0.95)");
+  footerGradient.addColorStop(1, "rgba(25, 20, 20, 0.95)");
+  ctx.fillStyle = footerGradient;
+  ctx.fillRect(0, footerY, width, footerHeight);
+  
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 32px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("Reply so de tai nhac", width / 2, footerY + 45);
+  
+  ctx.font = "20px Arial";
+  ctx.fillStyle = "#b3b3b3";
+  ctx.fillText("Powered by Spotify API", width / 2, footerY + 75);
+
+  return canvas.toBuffer();
+}
+
+async function createPlayerCanvas(data) {
+  const width = 800;
+  const height = 400;
+  
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
+  // Load và vẽ background image TRƯỚC - FULL OPACITY
+  let bgLoaded = false;
+  try {
+    const bgUrl = BACKGROUNDS[Math.floor(Math.random() * BACKGROUNDS.length)];
+    const bgImage = await loadImage(bgUrl);
+    ctx.drawImage(bgImage, 0, 0, width, height);
+    bgLoaded = true;
+  } catch (e) {
+    console.log("Background image failed, using gradient");
+  }
+
+  // Nếu không có background image thì dùng gradient
+  if (!bgLoaded) {
+    const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, "#1a1a2e");
+    bgGradient.addColorStop(0.3, "#16213e");
+    bgGradient.addColorStop(0.6, "#0f3460");
+    bgGradient.addColorStop(1, "#1a1a2e");
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // Overlay tối để làm nổi bật card
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.fillRect(0, 0, width, height);
+
+  // Vẽ các circle trang trí MỜ HƠN
+  ctx.globalAlpha = 0.05;
+  const circles = [
+    { x: 100, y: 100, r: 150 },
+    { x: 700, y: 80, r: 120 },
+    { x: 600, y: 350, r: 100 },
+    { x: 150, y: 320, r: 80 }
+  ];
+  
+  circles.forEach(circle => {
+    const circleGradient = ctx.createRadialGradient(
+      circle.x, circle.y, 0,
+      circle.x, circle.y, circle.r
+    );
+    circleGradient.addColorStop(0, "#1db954");
+    circleGradient.addColorStop(1, "transparent");
+    ctx.fillStyle = circleGradient;
+    ctx.beginPath();
+    ctx.arc(circle.x, circle.y, circle.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Card container với glassmorphism - TRONG SUỐT HƠN
+  const cardX = 40;
+  const cardY = 40;
+  const cardWidth = width - 80;
+  const cardHeight = height - 80;
+  const cardRadius = 25;
+
+  // Shadow cho card
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 20;
+
+  // Vẽ card background với glass effect - GIẢM OPACITY
+  ctx.fillStyle = "rgba(20, 20, 30, 0.5)";
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardWidth, cardHeight, cardRadius);
+  ctx.fill();
+
+  // Border gradient - SÁNG HƠN
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  const borderGradient = ctx.createLinearGradient(cardX, cardY, cardX + cardWidth, cardY + cardHeight);
+  borderGradient.addColorStop(0, "rgba(29, 185, 84, 1)");
+  borderGradient.addColorStop(0.5, "rgba(29, 185, 84, 0.5)");
+  borderGradient.addColorStop(1, "rgba(29, 185, 84, 1)");
+  ctx.strokeStyle = borderGradient;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardWidth, cardHeight, cardRadius);
+  ctx.stroke();
+
+  // Album Art Section
+  const artSize = 240;
+  const artX = cardX + 40;
+  const artY = cardY + (cardHeight - artSize) / 2;
+
+  // Vẽ glow effect cho album art
+  ctx.shadowColor = "#1db954";
+  ctx.shadowBlur = 50;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Album art background
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.beginPath();
+  ctx.roundRect(artX - 5, artY - 5, artSize + 10, artSize + 10, 15);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  // Load và vẽ album art
+  try {
+    const thumbnail = await loadImage(data.thumbnail);
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(artX, artY, artSize, artSize, 12);
+    ctx.clip();
+    ctx.drawImage(thumbnail, artX, artY, artSize, artSize);
+    ctx.restore();
+
+    // Border cho album art - SÁNG HƠN
+    ctx.strokeStyle = "#1db954";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(artX, artY, artSize, artSize, 12);
+    ctx.stroke();
+
+  } catch (e) {
+    // Fallback với icon
+    ctx.fillStyle = "rgba(40, 40, 40, 0.95)";
+    ctx.beginPath();
+    ctx.roundRect(artX, artY, artSize, artSize, 12);
+    ctx.fill();
+    
+    // VẼ ICON NHẠC BẰNG HÌNH HỌC
+    ctx.fillStyle = "#1db954";
+    
+    // Vẽ note nhạc
+    ctx.beginPath();
+    ctx.arc(artX + artSize/2 - 20, artY + artSize/2 + 30, 20, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.arc(artX + artSize/2 + 20, artY + artSize/2 + 30, 20, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillRect(artX + artSize/2 - 20, artY + artSize/2 - 40, 8, 70);
+    ctx.fillRect(artX + artSize/2 + 20, artY + artSize/2 - 30, 8, 60);
+    
+    ctx.fillRect(artX + artSize/2 - 20, artY + artSize/2 - 40, 48, 8);
+    
+    ctx.strokeStyle = "#1db954";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(artX, artY, artSize, artSize, 12);
+    ctx.stroke();
+  }
+
+  // Info Section
+  const infoX = artX + artSize + 50;
+  const infoY = cardY + 60;
+  const infoW = cardWidth - artSize - 130;
+
+  // Spotify logo mini
+  ctx.fillStyle = "#1db954";
+  ctx.beginPath();
+  ctx.arc(infoX, infoY - 10, 15, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Vẽ note nhỏ trong logo
+  ctx.fillStyle = "#000000";
+  ctx.beginPath();
+  ctx.arc(infoX - 3, infoY - 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(infoX - 3, infoY - 15, 2, 10);
+  ctx.fillRect(infoX + 2, infoY - 12, 2, 7);
+  ctx.fillRect(infoX - 3, infoY - 15, 7, 2);
+
+  // "NOW PLAYING" text
+  ctx.fillStyle = "#1db954";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "left";
+  ctx.fillText("NOW PLAYING", infoX + 25, infoY - 5);
+
+  // Divider line
+  ctx.strokeStyle = "rgba(29, 185, 84, 0.5)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(infoX, infoY + 10);
+  ctx.lineTo(infoX + infoW - 20, infoY + 10);
+  ctx.stroke();
+
+  // Song Title với gradient - SÁNG HƠN
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 36px Arial";
+  
+  // Thêm text shadow để nổi bật
+  ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 2;
+  
+  const titleLines = wrapText(ctx, data.title, infoW - 20);
+  titleLines.slice(0, 2).forEach((line, idx) => {
+    ctx.fillText(line, infoX, infoY + 50 + (idx * 40));
+  });
+
+  // Artist name - SÁNG HƠN
+  ctx.fillStyle = "#e0e0e0";
+  ctx.font = "24px Arial";
+  const artistLines = wrapText(ctx, data.author, infoW - 20);
+  artistLines.slice(0, 1).forEach((line, idx) => {
+    ctx.fillText(line, infoX, infoY + 145 + (idx * 28));
+  });
+
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+
+  // Duration - VẼ ICON ĐỒNG HỒ
+  ctx.strokeStyle = "#1db954";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(infoX + 10, infoY + 177, 8, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(infoX + 10, infoY + 177);
+  ctx.lineTo(infoX + 10, infoY + 172);
+  ctx.moveTo(infoX + 10, infoY + 177);
+  ctx.lineTo(infoX + 14, infoY + 177);
+  ctx.stroke();
+  
+  ctx.fillStyle = "#1db954";
+  ctx.font = "20px Arial";
+  ctx.fillText(data.duration, infoX + 25, infoY + 185);
+
+  // Progress bar
+  const barY = infoY + 210;
+  const barWidth = infoW - 20;
+  const barHeight = 6;
+  
+  // Background bar - SÁNG HƠN
+  ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+  ctx.beginPath();
+  ctx.roundRect(infoX, barY, barWidth, barHeight, 3);
+  ctx.fill();
+  
+  // Progress bar gradient
+  const progressGradient = ctx.createLinearGradient(infoX, barY, infoX + barWidth * 0.3, barY);
+  progressGradient.addColorStop(0, "#1db954");
+  progressGradient.addColorStop(1, "#1ed760");
+  ctx.fillStyle = progressGradient;
+  ctx.beginPath();
+  ctx.roundRect(infoX, barY, barWidth * 0.3, barHeight, 3);
+  ctx.fill();
+
+  // Progress dot
+  ctx.fillStyle = "#ffffff";
+  ctx.shadowColor = "rgba(29, 185, 84, 0.8)";
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  ctx.arc(infoX + barWidth * 0.3, barY + barHeight/2, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Control buttons
+  const controlY = barY + 45;
+  const buttonSpacing = 70;
+  const startX = infoX + (infoW - buttonSpacing * 2) / 2;
+
+  // Previous button
+  ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.beginPath();
+  ctx.arc(startX, controlY, 22, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(startX + 5, controlY);
+  ctx.lineTo(startX - 5, controlY - 8);
+  ctx.lineTo(startX - 5, controlY + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(startX - 8, controlY - 8, 3, 16);
+
+  // Play button (main)
+  const playGradient = ctx.createRadialGradient(startX + buttonSpacing, controlY, 0, startX + buttonSpacing, controlY, 35);
+  playGradient.addColorStop(0, "#1ed760");
+  playGradient.addColorStop(1, "#1db954");
+  ctx.fillStyle = playGradient;
+  ctx.shadowColor = "rgba(29, 185, 84, 0.8)";
+  ctx.shadowBlur = 25;
+  ctx.beginPath();
+  ctx.arc(startX + buttonSpacing, controlY, 35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#000000";
+  ctx.beginPath();
+  ctx.moveTo(startX + buttonSpacing - 8, controlY - 12);
+  ctx.lineTo(startX + buttonSpacing - 8, controlY + 12);
+  ctx.lineTo(startX + buttonSpacing + 12, controlY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Next button
+  ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.beginPath();
+  ctx.arc(startX + buttonSpacing * 2, controlY, 22, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(startX + buttonSpacing * 2 - 5, controlY);
+  ctx.lineTo(startX + buttonSpacing * 2 + 5, controlY - 8);
+  ctx.lineTo(startX + buttonSpacing * 2 + 5, controlY + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(startX + buttonSpacing * 2 + 5, controlY - 8, 3, 16);
+
+  // Powered by text ở góc
+  ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+  ctx.font = "12px Arial";
+  ctx.textAlign = "right";
+  ctx.fillText("Powered by Spotify", cardX + cardWidth - 20, cardY + cardHeight - 15);
+
+  return canvas.toBuffer();
+}
+
+module.exports.handleReply = async function ({ api, event, handleReply }) {
+  const choice = parseInt(event.body.trim());
+  if (isNaN(choice) || choice < 1 || choice > handleReply.results.length) {
+    return api.sendMessage(
+      `So khong hop le! Vui long chon tu 1-${handleReply.results.length}`, 
+      event.threadID, 
+      event.messageID
+    );
+  }
+
+  const track = handleReply.results[choice - 1];
+  
+  let loadMsg;
+  try {
+    loadMsg = await api.sendMessage("Dang tai nhac...", event.threadID);
+  } catch (e) {
+    console.error("Loi gui message:", e);
+  }
+
+  try {
+    const downloadUrl = `${DOWNLOAD_API}?url=${encodeURIComponent(track.url)}`;
+    console.log("Downloading from:", track.url);
+    console.log("API URL:", downloadUrl);
+    
+    const res = await axios.get(downloadUrl, { 
+      timeout: 40000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    console.log("Download API response:", JSON.stringify(res.data, null, 2));
+    
+    if (!res.data.success || !res.data.data) {
+      throw new Error("API khong tra ve du lieu");
+    }
+
+    const data = res.data.data;
+    let musicUrl = data.music || (data.attachment && data.attachment[0] && data.attachment[0].url);
+    
+    if (!musicUrl) {
+      throw new Error("Khong tim thay link nhac");
+    }
+    
+    console.log("Music URL found:", musicUrl);
+
+    const fileName = `spotify_${Date.now()}.mp3`;
+    const filePath = path.join(__dirname, "cache", fileName);
+    
+    console.log("Downloading MP3 to:", filePath);
+    
+    const musicResponse = await axios({
+      url: musicUrl,
+      method: "GET",
+      responseType: "stream",
+      timeout: 180000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const writer = fs.createWriteStream(filePath);
+    musicResponse.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on("finish", () => {
+        console.log("MP3 download finished");
+        resolve();
+      });
+      writer.on("error", (err) => {
+        console.error("Writer error:", err);
+        reject(err);
+      });
+    });
+
+    if (!fs.existsSync(filePath)) {
+      throw new Error("File khong duoc tao");
+    }
+
+    const fileSize = fs.statSync(filePath).size;
+    console.log("File size:", fileSize, "bytes");
+    
+    if (fileSize < 50000) {
+      fs.unlinkSync(filePath);
+      throw new Error(`File qua nho (${fileSize} bytes)`);
+    }
+
+    const maxSize = 25 * 1024 * 1024;
+    if (fileSize > maxSize) {
+      fs.unlinkSync(filePath);
+      if (loadMsg) api.unsendMessage(loadMsg.messageID);
+      return api.sendMessage(
+        `File qua lon (${(fileSize / 1024 / 1024).toFixed(2)}MB)!`,
+        event.threadID
+      );
+    }
+
+    const canvasBuffer = await createPlayerCanvas(data);
+    const canvasPath = path.join(__dirname, "cache", `spotify_player_${event.senderID}.png`);
+    fs.writeFileSync(canvasPath, canvasBuffer);
+
+    console.log("Sending canvas...");
+
+    await api.sendMessage({
+      attachment: fs.createReadStream(canvasPath)
+    }, event.threadID);
+
+    console.log("Canvas sent!");
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    console.log("Sending music...");
+
+    await api.sendMessage({
+      attachment: fs.createReadStream(filePath)
+    }, event.threadID);
